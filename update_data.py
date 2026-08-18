@@ -242,13 +242,23 @@ try:
             if c.get('picture'): all_resolved.add(c['picture'].lower())
             for u in c.get('upgrades', []):
                 if u.get('picture'): all_resolved.add(u['picture'].lower())
-        missing = sorted(p for p in all_resolved if p not in actual_files)
-        print('  Missing images: %d' % len(missing))
-        if missing:
+        # Only report truly missing files - no PNG fallback available either
+        truly_missing = []
+        for p in sorted(all_resolved):
+            if p not in actual_files:
+                # Check if PNG counterpart exists as fallback
+                name, ext = os.path.splitext(p)
+                png_fallback = name + '.png'
+                if png_fallback not in actual_files:
+                    truly_missing.append(p)
+        print('  Truly missing images (no fallback): %d' % len(truly_missing))
+        if truly_missing:
             missing_file = os.path.join(SCRIPT_DIR, 'missing_images.txt')
             with open(missing_file, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(missing))
+                f.write('\n'.join(truly_missing))
             print('  List written to missing_images.txt')
+        else:
+            print('  All images have at least a PNG fallback - no missing_images.txt needed')
 
     print('\nBuilding maps...')
     id_to_name,fusion_from,fusion_to,base_fusion_from,base_fusion_to,summoned_by=build_derived(all_cards,fusion_map)
