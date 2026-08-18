@@ -11,7 +11,8 @@ FACTION_MAP  = {'1':'Imperial','2':'Raider','3':'Bloodthirsty','4':'Xeno','5':'R
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 XML_DIR    = os.path.join(SCRIPT_DIR, 'XMLS')
 OUT_FILE   = os.path.join(SCRIPT_DIR, 'tu_data.json')
-IMAGES_DIR = os.path.join(SCRIPT_DIR, 'images')
+IMAGES_DIR   = os.path.join(SCRIPT_DIR, 'images')
+PICTURES_DIR = os.path.join(SCRIPT_DIR, 'pictures')
 
 def fetch(url, label):
     try:
@@ -182,15 +183,38 @@ try:
     else:
         print('  WARNING: images/ folder not found, skipping')
 
+    # Build set of filenames in images/ for fast lookup
+    img_lookup_set = set(f.lower() for f in os.listdir(IMAGES_DIR)) if os.path.isdir(IMAGES_DIR) else set()
+    _copied_from_pictures = []
+
     def resolve_pic(pic):
         if not pic: return pic
         name, ext = os.path.splitext(pic)
         if ext:
-            # Has extension - just lowercase the whole thing
+            # Has extension explicitly in XML - lowercase and use as-is
             return pic.lower()
-        # No extension - look up in images folder
-        resolved = img_lookup.get(pic.lower())
-        return resolved if resolved else pic.lower() + '.jpg'
+        # No extension in XML: prefer PNG, fallback to JPG
+        import shutil as _sh
+        png_name = pic.lower() + '.png'
+        jpg_name = pic.lower() + '.jpg'
+        # 1. Already in images/ as PNG -> use it
+        if png_name in img_lookup_set:
+            return png_name
+        # 2. Check pictures/ folder for PNG and copy to images/
+        if os.path.isdir(PICTURES_DIR):
+            for fname in os.listdir(PICTURES_DIR):
+                if fname.lower() == png_name:
+                    src = os.path.join(PICTURES_DIR, fname)
+                    dst = os.path.join(IMAGES_DIR, png_name)
+                    _sh.copy2(src, dst)
+                    img_lookup_set.add(png_name)
+                    _copied_from_pictures.append(png_name)
+                    return png_name
+        # 3. PNG not found anywhere - fall back to JPG if available
+        if jpg_name in img_lookup_set:
+            return jpg_name
+        # 4. Nothing found - return PNG name so missing_images.txt catches it
+        return png_name
 
     fixed = 0
     for c in all_cards:
@@ -202,6 +226,29 @@ try:
             u['picture'] = resolve_pic(u.get('picture', ''))
             if u['picture'] != orig_u: fixed += 1
     print('  %d picture paths resolved' % fixed)
+
+    # Report copied and missing images
+    if _copied_from_pictures:
+        print('  Copied from pictures/: %d files' % len(_copied_from_pictures))
+        for f in _copied_from_pictures[:10]:
+            print('    ' + f)
+        if len(_copied_from_pictures) > 10:
+            print('    ... and %d more' % (len(_copied_from_pictures) - 10))
+
+    if os.path.isdir(IMAGES_DIR):
+        actual_files = set(f.lower() for f in os.listdir(IMAGES_DIR))
+        all_resolved = set()
+        for c in all_cards:
+            if c.get('picture'): all_resolved.add(c['picture'].lower())
+            for u in c.get('upgrades', []):
+                if u.get('picture'): all_resolved.add(u['picture'].lower())
+        missing = sorted(p for p in all_resolved if p not in actual_files)
+        print('  Missing images: %d' % len(missing))
+        if missing:
+            missing_file = os.path.join(SCRIPT_DIR, 'missing_images.txt')
+            with open(missing_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(missing))
+            print('  List written to missing_images.txt')
 
     print('\nBuilding maps...')
     id_to_name,fusion_from,fusion_to,base_fusion_from,base_fusion_to,summoned_by=build_derived(all_cards,fusion_map)
